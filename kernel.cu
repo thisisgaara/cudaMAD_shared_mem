@@ -3,12 +3,12 @@
 //-------------------------------------------------------------------
 #include "header.h"
 #define SHARED_TEST
-#include<time.h>
+#include <time.h>
 #include <stdlib.h>
 
-#define N 32
-#define BLK_SIZE N 
-#define WIN_SIZE 16
+#define N 16
+#define BLK_SIZE 4 //blocksize(ThreadDim)
+#define WIN_SIZE 2
 
 #ifdef OLD_CODE
 __global__ void compute_win2D(int *knode, int *kcell)
@@ -408,15 +408,15 @@ __global__ void A5_fast_lo_stats_kernel_SHARED(float* xVal, float* out)
 	}
 }
 #endif
-void write_to_file_DEBUG(float* w, const int SIZE)
+void write_to_file_DEBUG(float* w, int size)
 {
 	std::ofstream outFile;
 	outFile.open("TEST.txt");
-	for (int i = 0; i < SIZE; i++)  // Itterate over rows
+	for (int i = 0; i < size; i++)  // Itterate over rows
 	{
-		for (int j = 0; j < SIZE; j++) // Itterate over cols
-			outFile << w[i * SIZE + j] << " ";
-		if (i != SIZE - 1)
+		for (int j = 0; j < size; j++) // Itterate over cols
+			outFile << w[i * size + j] << " ";
+		if (i != size - 1)
 			outFile << ";\n";
 	}
 	outFile.close();
@@ -436,7 +436,7 @@ __global__ void min_kernel(float* xVal, float* xVal_window, float* out)
 {
 	//Declarations
 	//__shared__ float xVal_Shm[256];
-	__shared__ float xVal_smem[BLK_SIZE + WIN_SIZE][BLK_SIZE + WIN_SIZE]; 
+	__shared__ float xVal_smem[BLK_SIZE + WIN_SIZE][BLK_SIZE + WIN_SIZE]; //threadDim.x, threadDim.y size
 	float mean = 0, stdev = 0, skw = 0, krt = 0, stmp = 0;
 	float iB, jB;
 	//https://cs.calvin.edu/courses/cs/374/CUDA/CUDA-Thread-Indexing-Cheatsheet.pdf
@@ -444,46 +444,44 @@ __global__ void min_kernel(float* xVal, float* xVal_window, float* out)
 	//Used in code
 	int global_idx = (threadIdx.x + blockIdx.x * blockDim.x);
 	int global_idy = (threadIdx.y + blockIdx.y * blockDim.y);
-
-	if ((global_idx < N ) && (global_idy < N))
+	if ((global_idx < N) && (global_idy < N))
 	{
 		xVal_smem[threadIdx.x][threadIdx.y] = *(xVal + global_idx * N + global_idy);
-		if ((threadIdx.x >= (N - WIN_SIZE)) && (threadIdx.y >= (N - WIN_SIZE)))
+		if ((threadIdx.x >= (BLK_SIZE - WIN_SIZE)) && (threadIdx.y >= (BLK_SIZE - WIN_SIZE)))
 		{
-			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = *(xVal + global_idx * N + global_idy);
+			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = *(xVal + (global_idx + WIN_SIZE)* N + (global_idy + WIN_SIZE));
 		}
-	if (threadIdx.y >= (N - WIN_SIZE))
+		if (threadIdx.y >= (BLK_SIZE - WIN_SIZE))
 		{
 			//smem[threadIdx.x][threadIdx.y + WIN_SIZE] = *((int*)kcell + idx * N + idy + WIN_SIZE);
-			xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = *(xVal + global_idx * N + global_idy);
+			xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = *(xVal + global_idx * N + global_idy + WIN_SIZE);
 			//printf("%d %d %d %d %d %d %d\n", threadIdx.x, threadIdx.y, threadIdx.x, threadIdx.y + WIN_SIZE, xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE], temp, *((int*)xVal + global_idx * N + global_idy));
 		}
-
-	if (threadIdx.x >= (N - WIN_SIZE))
+		if (threadIdx.x >= (BLK_SIZE - WIN_SIZE))
 		{
-			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = *(xVal + global_idx * N + global_idy);
+			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = *(xVal + (global_idx + WIN_SIZE) * N + global_idy);
 		}
-
-		
 		__syncthreads();
-		//if ((global_idx == 0) && (global_idy == 0))
-		//	for (int i = 0; i < N + WIN_SIZE; i++){
-		//		for (int j = 0; j < N + WIN_SIZE; j++)
-		//			printf("%d ", xVal_smem[i][j]);
-		//	printf("\n");
-		//	}
-
-		float temp = xVal_window[global_idx * N + global_idy];
+		//printf("%d %d %d\n", threadIdx.x, threadIdx.y, temp);
+	}
+	if ((global_idx < N - WIN_SIZE) && (global_idy < N - WIN_SIZE))
+	{
+		float temp = xVal_smem[threadIdx.x][threadIdx.y];
 		for (int x = 0; x < WIN_SIZE; x++)
 		{
 			for (int y = 0; y < WIN_SIZE; y++)
 			{
-				if (temp > xVal_smem[threadIdx.x + x][threadIdx.y + y])
+				if (temp < xVal_smem[threadIdx.x + x][threadIdx.y + y])
+				{
 					temp = xVal_smem[threadIdx.x + x][threadIdx.y + y];
+				}
 			}
 		}
 		out[global_idx * N + global_idy] = temp;
-
+	}
+	else
+	{
+		out[global_idx * N + global_idy] = xVal_smem[threadIdx.x][threadIdx.y];
 	}
 }
 #endif
@@ -497,10 +495,10 @@ void fill_input(float *a)
 		}
 	}
 }
-float init_array[(N + WIN_SIZE)][(N + WIN_SIZE)];
-void min_CPU(float src[N*N], float target[])
+//float init_array[(N + WIN_SIZE)][(N + WIN_SIZE)];
+void min_CPU(float init_array[N*N], float target[])
 {
-	memset(init_array, 0, sizeof(init_array));
+	/*memset(init_array, 0, sizeof(init_array));
 	for (int i = 0; i < N + WIN_SIZE; i++)
 	{
 		for (int j = 0; j < N + WIN_SIZE; j++)
@@ -526,18 +524,18 @@ void min_CPU(float src[N*N], float target[])
 			}
 		}
 	}
-	//First copy WIN_SIZE cols and WIN_SIZE rows of the array
-	for (int i = 0; i < N; i++)
+	*///First copy WIN_SIZE cols and WIN_SIZE rows of the array
+	for (int i = 0; i < N - WIN_SIZE; i++)
 	{
-		for (int j = 0; j < N; j++)
+		for (int j = 0; j < N - WIN_SIZE; j++)
 		{
-			float temp = src[i * N + j];
+			float temp = init_array[i * N + j];
 			for (int p = 0; p < WIN_SIZE; p++)
 			{
 				for (int q = 0; q < WIN_SIZE; q++)
 				{
-					if (temp > init_array[(i + p)][(j + q)])
-						temp = init_array[(i + p)][(j + q)];
+					if (temp < init_array[(i + p)*N +(j + q)])
+						temp = init_array[(i + p) *N + (j + q)];
 				}
 			}
 			target[i * N + j] = temp;
@@ -589,13 +587,13 @@ void kernel_wrapper()
 	}
 	}*/
 
-	dim3 gridSize(1, 1, 1);
-	dim3 blockSize(32, 32, 1);
+	dim3 gridSize(4, 4, 1);
+	dim3 blockSize(4, 4, 1);
 	static float h_orig_out[N * N];
 	float h_shared_out[N*N];
 	memcpy(h_orig_out, a, sizeof(a));
 	min_CPU(a, h_orig_out);
-
+	//write_to_file_DEBUG(h_orig_out, sizeof(h_orig_out) / sizeof(float));
 	float* d_a, *d_b, *d_out;
 	cudaMalloc(&d_a, sizeof(float) * N*N);
 	cudaMalloc(&d_b, sizeof(float) * N*N);
@@ -629,7 +627,7 @@ void kernel_wrapper()
 	A5_fast_lo_stats_kernel_SHARED << < gridSize, blockSize, 0 >> >(d_a, d_out);
 	cudaMemcpy(h_shared_out, d_out, N*N*sizeof(int), cudaMemcpyDeviceToHost);
 #endif
-
+	
 	check(h_orig_out, h_shared_out);
 	cudaFree(d_a);
 	cudaFree(d_b);
