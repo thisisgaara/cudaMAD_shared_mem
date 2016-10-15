@@ -162,18 +162,18 @@ __global__ void min_kernel(float* xVal, float* out)
 	//	}
 	if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
 	{
-		xVal_smem[threadIdx.x][threadIdx.y] = xVal[global_idx* N + global_idy];
+		xVal_smem[threadIdx.y][threadIdx.x] = xVal[global_idx* N + global_idy];
 		if (threadIdx.y >= 4)
 		{
-			xVal_smem[threadIdx.x][threadIdx.y + 4] = xVal[global_idx* N + global_idy + 4];
+			xVal_smem[threadIdx.y + 4][threadIdx.x] = xVal[global_idx* N + global_idy + 4];
 		}
 		if (threadIdx.x >= 4)
 		{
-			xVal_smem[threadIdx.x + 4][threadIdx.y] = xVal[(global_idx + 4)* N + global_idy];
+			xVal_smem[threadIdx.y][threadIdx.x + 4] = xVal[(global_idx + 4)* N + global_idy];
 		}
 		if (threadIdx.y >= 4 && threadIdx.x >= 4)
 		{
-			xVal_smem[threadIdx.x + 4][threadIdx.y + 4] = xVal[(global_idx + 4)* N + global_idy + 4];
+			xVal_smem[threadIdx.y + 4][threadIdx.x + 4] = xVal[(global_idx + 4)* N + global_idy + 4];
 		}
 	}
 	__syncthreads();
@@ -182,17 +182,14 @@ __global__ void min_kernel(float* xVal, float* out)
 	{
 		if (blockIdx.x == 2 && blockIdx.y == 0)
 			printf("Hello");
-		for (int x = 0 + threadIdx.x; x < WIN_SIZE+threadIdx.x; x++)
+		for (int y = 0 + threadIdx.y; y < WIN_SIZE+threadIdx.y; y++)
 		{
-			for (int y = 0 + threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
+			for (int x = 0 + threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
 			{
-				//mean += xVal_smem[threadIdx.x + x][threadIdx.y + y];
-				//mean += xVal_smem[x][y];
-				if (mean < xVal_smem[x][y])
-					mean = xVal_smem[x][y];
+				mean += xVal_smem[y][x];
 			}
 		}
-		//mean = mean / 64.0f;
+		mean = mean / 64.0f;
 
 		int x = blockIdx.x;
 		int y = blockIdx.y;
@@ -227,8 +224,6 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 		// THE FOLLOWING SET OF RUNNING SUMS CAN BE A set of PARALLEL REDUCTIONs (in shared memory?)
 		// 256 itteratios -> log2(256)=8 itterations
 		// Store block into registers (256 x 4Bytes = 1kB)
-		if (global_idx == 0 && global_idy == 1)
-			printf("Hello");
 		int idx = 0;
 		for (iB = i; iB < i + WIN_SIZE; iB++)
 		{
@@ -240,10 +235,8 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 		//Traverse through and get mean
 		float mean = 0;
 		for (idx = 0; idx < WIN_SIZE * WIN_SIZE; idx++)
-			if (mean < xVal_local[idx])
-				mean = xVal_local[idx];
-			//mean += xVal_local[idx];				//this can be a simple reduction in shared memory
-		//mean = mean / 64.0f;
+					mean += xVal_local[idx];				//this can be a simple reduction in shared memory
+		mean = mean / 64.0f;
 	//	printf("%d %d %d %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y, global_idx*N + global_idy);
 		out[global_idx * N + global_idy] = mean;
 		
