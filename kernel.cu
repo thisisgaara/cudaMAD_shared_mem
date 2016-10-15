@@ -1,18 +1,6 @@
 // kernel.cu
 //This is the project for optimizing memory access stride.
 //-------------------------------------------------------------------
-#include "header.h"
-#define SHARED_TEST
-#include <time.h>
-#include <stdlib.h>
-
-#define N 16
-#define BLK_SIZE 4 //blocksize(ThreadDim)
-#define WIN_SIZE 2
-
-
-//ORIGINAL KERNEL FOR REFERENCE
-
 #ifdef DEFAULT
 __global__ void A5_fast_lo_stats_kernel(float* xVal, float* outStd, float* outSkw, float* outKrt)
 {
@@ -125,6 +113,15 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* outStd, float* outSk
 	}
 }
 #endif
+#include "header.h"
+#define SHARED_TEST
+#include <time.h>
+#include <stdlib.h>
+
+#define N 64
+#define BLK_SIZE 8 //blocksize(ThreadDim)
+#define WIN_SIZE 8
+
 
 void check(float *a, float *b)
 {
@@ -141,7 +138,7 @@ __global__ void min_kernel(float* xVal, float* out)
 {
 	//Declarations
 	//__shared__ float xVal_Shm[256];
-	__shared__ float xVal_smem[BLK_SIZE + WIN_SIZE][BLK_SIZE + WIN_SIZE]; //threadDim.x, threadDim.y size
+	__shared__ float xVal_smem[WIN_SIZE+4][WIN_SIZE + 4]; //threadDim.x, threadDim.y size
 	float mean = 0, stdev = 0, skw = 0, krt = 0, stmp = 0;
 	float iB, jB;
 	//https://cs.calvin.edu/courses/cs/374/CUDA/CUDA-Thread-Indexing-Cheatsheet.pdf
@@ -149,47 +146,73 @@ __global__ void min_kernel(float* xVal, float* out)
 	//Used in code
 	int global_idx = (threadIdx.x + blockIdx.x * blockDim.x);
 	int global_idy = (threadIdx.y + blockIdx.y * blockDim.y);
-	if ((global_idx < N) && (global_idy < N))
+	int global_idx1 = 4 * (threadIdx.x + blockIdx.x * blockDim.x);
+	int global_idy1 = 4 * (threadIdx.y + blockIdx.y * blockDim.y);
+	//if ((global_idx < N ) && (global_idy < N))
+	//{
+	//	for (int x = 0; x < WIN_SIZE; x++)
+	//	{
+	//		for (int y = 0; y < WIN_SIZE; y++)
+	//		{
+	//			if (global_idx == 8 && global_idy1 == 8)
+	//				printf("%d ", *(xVal + (global_idx + x)* N + global_idy + y));
+	//			//xVal_smem[x][y] = xVal[(global_idx + x)* N + global_idy + y];
+	//			xVal_smem[x][y] = xVal[(threadIdx.x + x)* N + threadIdx.y + y];
+	//		}
+	//	}
+	if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
 	{
-		xVal_smem[threadIdx.x][threadIdx.y] = *(xVal + global_idx * N + global_idy);
-		if ((threadIdx.x >= (BLK_SIZE - WIN_SIZE)) && (threadIdx.y >= (BLK_SIZE - WIN_SIZE)))
+		xVal_smem[threadIdx.x][threadIdx.y] = xVal[global_idx* N + global_idy];
+		if (threadIdx.y >= 4)
 		{
-			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = *(xVal + (global_idx + WIN_SIZE)* N + (global_idy + WIN_SIZE));
+			xVal_smem[threadIdx.x][threadIdx.y + 4] = xVal[global_idx* N + global_idy + 4];
 		}
-		if (threadIdx.y >= (BLK_SIZE - WIN_SIZE))
+		if (threadIdx.x >= 4)
 		{
-			xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = *(xVal + global_idx * N + global_idy + WIN_SIZE);
+			xVal_smem[threadIdx.x + 4][threadIdx.y] = xVal[(global_idx + 4)* N + global_idy];
 		}
-		if (threadIdx.x >= (BLK_SIZE - WIN_SIZE))
+		if (threadIdx.y >= 4 && threadIdx.x >= 4)
 		{
-			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = *(xVal + (global_idx + WIN_SIZE) * N + global_idy);
+			xVal_smem[threadIdx.x + 4][threadIdx.y + 4] = xVal[(global_idx + 4)* N + global_idy + 4];
 		}
-		__syncthreads();
-		//printf("%d %d %d\n", threadIdx.x, threadIdx.y, temp);
 	}
-	if ((global_idx < N - WIN_SIZE) && (global_idy < N - WIN_SIZE))
+	__syncthreads();
+	if ((threadIdx.x == 0 & threadIdx.y == 0) || (threadIdx.x == 0 & threadIdx.y == 4) || \
+		(threadIdx.x == 4 & threadIdx.y == 0) || (threadIdx.x == 4 & threadIdx.y == 4))
 	{
-		float mean = 0; 
-		for (int x = 0; x < WIN_SIZE; x++)
+		if (blockIdx.x == 2 && blockIdx.y == 0)
+			printf("Hello");
+		for (int x = 0 + threadIdx.x; x < WIN_SIZE+threadIdx.x; x++)
 		{
-			for (int y = 0; y < WIN_SIZE; y++)
+			for (int y = 0 + threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
 			{
-					mean += xVal_smem[threadIdx.x + x][threadIdx.y + y];
+				//mean += xVal_smem[threadIdx.x + x][threadIdx.y + y];
+				//mean += xVal_smem[x][y];
+				if (mean < xVal_smem[x][y])
+					mean = xVal_smem[x][y];
 			}
 		}
-		mean = mean / 4.0f;
-		out[global_idx * N + global_idy] = mean;
+		//mean = mean / 64.0f;
+
+		int x = blockIdx.x;
+		int y = blockIdx.y;
+		if (blockIdx.x != WIN_SIZE - 1 && blockIdx.y != WIN_SIZE - 1)
+		{
+			out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
+			out[((x * 2) + threadIdx.x / 4) * N + (y * 2) + threadIdx.y / 4] = mean; //Too much jugaad!!
+		}	
+		else
+			out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
+		printf("%d %d %d %d %d %d\n", blockIdx.x, blockIdx.y, threadIdx.x, threadIdx.y, ((x * 2) + threadIdx.x / 4) * N + (y * 2) + threadIdx.y / 4, mean);
 	}
 	else
-	{
-		out[global_idx * N + global_idy] = xVal_smem[threadIdx.x][threadIdx.y];
-	}
+		out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
 }
 #endif
 __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 {
 	//Declarations
-	float xVal_local[256];
+	float xVal_local[WIN_SIZE * WIN_SIZE];
 	float mean = 0;
 	int iB, jB;
 	int blockId = blockIdx.x + blockIdx.y * gridDim.x;
@@ -198,29 +221,32 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 	int j = 4 * (threadIdx.y + blockIdx.y * blockDim.y);
 	int global_idx = (threadIdx.x + blockIdx.x * blockDim.x);
 	int global_idy = (threadIdx.y + blockIdx.y * blockDim.y);
-	if ((i < 497) && (j < 497))//512-15=497
+	if ((i < N - WIN_SIZE) && (j < N- WIN_SIZE))//512-15=497
 	{
 		//for (j = 0; j<512 - 15; j += 4)
 		// THE FOLLOWING SET OF RUNNING SUMS CAN BE A set of PARALLEL REDUCTIONs (in shared memory?)
 		// 256 itteratios -> log2(256)=8 itterations
 		// Store block into registers (256 x 4Bytes = 1kB)
+		if (global_idx == 0 && global_idy == 1)
+			printf("Hello");
 		int idx = 0;
-		for (iB = i; iB < i + 4; iB++)
+		for (iB = i; iB < i + WIN_SIZE; iB++)
 		{
-			for (jB = j; jB < j + 4; jB++)
+			for (jB = j; jB < j + WIN_SIZE; jB++)
 			{
-				xVal_local[idx] = xVal[iB * N + jB];
-				//printf("%d ", iB * 512 + jB);
-				idx++;
+				xVal_local[idx++] = xVal[iB * N + jB];
 			}
 		}
 		//Traverse through and get mean
 		float mean = 0;
 		for (idx = 0; idx < WIN_SIZE * WIN_SIZE; idx++)
-			mean += xVal_local[idx];				//this can be a simple reduction in shared memory
-		mean = mean / 4.0f;
-
+			if (mean < xVal_local[idx])
+				mean = xVal_local[idx];
+			//mean += xVal_local[idx];				//this can be a simple reduction in shared memory
+		//mean = mean / 64.0f;
+	//	printf("%d %d %d %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y, global_idx*N + global_idy);
 		out[global_idx * N + global_idy] = mean;
+		
 	}
 	else
 		out[global_idx * N + global_idy] = xVal[global_idx * N + global_idy];
@@ -311,8 +337,8 @@ void kernel_wrapper()
 	//	}
 	//}
 
-	dim3 gridSize(4, 4, 1);
-	dim3 blockSize(4, 4, 1);
+	dim3 gridSize(8, 8, 1);
+	dim3 blockSize(BLK_SIZE, BLK_SIZE, 1);
 	static float h_orig_out[N * N];
 	static float h_shared_out[N * N];
 	static float h_orig_out_cpu[N*N];
@@ -329,11 +355,12 @@ void kernel_wrapper()
 	cudaMemcpy(d_a, a, sizeof(float) * N*N, cudaMemcpyHostToDevice);
 	A5_fast_lo_stats_kernel << < gridSize, blockSize >> > (d_a, d_out);
 	cudaMemcpy(h_orig_out, d_out, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
-	write_to_file_DEBUG(h_orig_out, 256);
-	//cudaMemset(d_out, 0, sizeof(float)* N*N);
-	//min_kernel<< < gridSize, blockSize >> > (d_a, d_out);
+	write_to_file_DEBUG(h_orig_out, N);
+	cudaMemset(d_out, 0, sizeof(float)* N*N);
+	cout << "Hallelujah" << endl;
+	min_kernel<< < gridSize, blockSize >> > (d_a, d_out);
 	cudaMemcpy(h_shared_out, d_out, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
-
+	write_to_file_DEBUG(h_shared_out, N);
 #if 0
 	cudaMalloc(&d_a, sizeof(int) * (N + WIN_SIZE) * (N + WIN_SIZE));
 	cudaMalloc(&d_b, sizeof(int) * (N + WIN_SIZE) * (N + WIN_SIZE));
