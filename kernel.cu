@@ -151,11 +151,14 @@ __global__ void min_kernel(float* xVal, float* out)
 	int global_idx1 = 4 * (threadIdx.x + blockIdx.x * blockDim.x);
 	int global_idy1 = 4 * (threadIdx.y + blockIdx.y * blockDim.y);
 	out[global_idx*N + global_idy] = xVal[global_idx* N + global_idy];
+
 	if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
 	{
+		if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
+			printf("Hello");
 			xVal_smem[threadIdx.x][threadIdx.y] = xVal[global_idx* N + global_idy];
 			xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = xVal[global_idx* N + global_idy + WIN_SIZE];
-			xVal_smem[threadIdx.x+WIN_SIZE][threadIdx.y] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
+			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
 			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
 	}
 	__syncthreads();
@@ -168,9 +171,8 @@ __global__ void min_kernel(float* xVal, float* out)
 					mean += xVal_smem[x][y];
 			}
 		}
-		if (blockIdx.x == 0 && blockIdx.y == 1)
-			printf("Hello");
 		mean = mean / 256.0f;
+		
 		int x = blockIdx.x;
 		int y = blockIdx.y;
 		//out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
@@ -178,6 +180,7 @@ __global__ void min_kernel(float* xVal, float* out)
 		{
 			out[((x * 4) + threadIdx.x / 4) * N + (y * 4) + threadIdx.y / 4] = mean; //Too much jugaad!!
 		}	
+
 	}
 }
 #endif
@@ -185,7 +188,7 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 {
 	//Declarations
 	float xVal_local[WIN_SIZE * WIN_SIZE];
-	float mean = 0;
+	float mean = 0, stdev = 0, skw = 0, krt = 0, stmp = 0;
 	int iB, jB;
 	int blockId = blockIdx.x + blockIdx.y * gridDim.x;
 	int threadId = blockId * (blockDim.x * blockDim.y) + (threadIdx.y * blockDim.x) + threadIdx.x;
@@ -207,14 +210,15 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 				xVal_local[idx++] = xVal[iB * N + jB];
 			}
 		}
-		//Traverse through and get mean
+	//	//Traverse through and get mean
 		float mean = 0;
 		for (idx = 0; idx < WIN_SIZE * WIN_SIZE; idx++)
 					mean += xVal_local[idx];				//this can be a simple reduction in shared memory
 		mean = mean / 256.0f;
+		
 	//	printf("%d %d %d %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y, global_idx*N + global_idy);
 		out[global_idx * N + global_idy] = mean;
-		
+	//	
 	}
 	else
 		out[global_idx * N + global_idy] = xVal[global_idx * N + global_idy];
@@ -296,14 +300,14 @@ void kernel_wrapper()
 	if (fp == NULL)
 		printf("ERROR\n");
 	float a[N*N];
-	fill_input(a);
-	/*for (int i = 0; i < N; i++)
+	//fill_input(a);
+	for (int i = 0; i < N; i++)
 	{
 		for (int j = 0; j < N; j++)
 		{
 			fscanf(fp, "%f", &a[i*N + j]);
 		}
-	}*/
+	}
 
 	dim3 gridSize(32, 32, 1);
 	dim3 blockSize(BLK_SIZE, BLK_SIZE, 1);
