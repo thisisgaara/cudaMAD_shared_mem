@@ -154,21 +154,20 @@ __global__ void min_kernel(float* xVal, float* out)
 
 	if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
 	{
-		if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-			printf("Hello");
-			xVal_smem[threadIdx.x][threadIdx.y] = xVal[global_idx* N + global_idy];
-			xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = xVal[global_idx* N + global_idy + WIN_SIZE];
-			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
-			xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
+		xVal_smem[threadIdx.y][threadIdx.x] = xVal[global_idx* N + global_idy];
+		xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x] = xVal[global_idx* N + global_idy + WIN_SIZE];
+		xVal_smem[threadIdx.y][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
+		xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
 	}
 	__syncthreads();
+
 	if ((threadIdx.x % 4 ==  0 && threadIdx.y % 4 == 0))
 	{
-		for (int x = 0 + threadIdx.x; x < WIN_SIZE+threadIdx.x; x++)
+		for (int x =  threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
 		{
-			for (int y = 0 + threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
+			for (int y = threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
 			{
-					mean += xVal_smem[x][y];
+				mean += xVal_smem[y][x];
 			}
 		}
 		mean = mean / 256.0f;
@@ -275,7 +274,7 @@ void fill_input(float *a)
 	{
 		for (int j = 0; j < N; j++)
 		{
-			a[i * N + j] = i + j;
+			a[i * N + j] = i*N + j;
 		}
 	}
 }
