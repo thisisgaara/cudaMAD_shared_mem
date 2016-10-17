@@ -182,40 +182,27 @@ __global__ void min_kernel(float* xVal, float* out, float* outStd, float* outSkw
 	int global_idy1 = 4 * (threadIdx.y + blockIdx.y * blockDim.y);
 	out[global_idx*N + global_idy] = xVal[global_idx* N + global_idy];
 
-	//if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
-	//{
-	//	xVal_smem[threadIdx.y][threadIdx.x] = xVal[global_idx* N + global_idy];
-	//	xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x] = xVal[global_idx* N + global_idy + WIN_SIZE];
-	//	xVal_smem[threadIdx.y][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
-	//	xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
-	//}
-
 	if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
 	{
-		xVal_smem[threadIdx.x][threadIdx.y] = xVal[global_idx* N + global_idy];
-		xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = xVal[global_idx* N + global_idy + WIN_SIZE];
-		xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
-		xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
+		xVal_smem[threadIdx.y][threadIdx.x] = xVal[global_idx* N + global_idy];
+		xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x] = xVal[global_idx* N + global_idy + WIN_SIZE];
+		xVal_smem[threadIdx.y][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
+		xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
 	}
-	__syncthreads();
+	//__syncthreads();
 
-	if ((threadIdx.x % 4 == 0 && threadIdx.y % 4 == 0))
+	if ((threadIdx.x % 4 == 0) && (threadIdx.y % 4 == 0))
 	{
-		//int y = threadIdx.y;
-		//for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
-		//{
-		//		mean += (xVal_smem[y][x] + xVal_smem[y+1][x] + xVal_smem[y+2][x] + xVal_smem[y+3][x]
-		//						+ xVal_smem[y+4][x] + xVal_smem[y+5][x]+ xVal_smem[y+6][x]+ xVal_smem[y+7][x]
-		//						+ xVal_smem[y+8][x] + xVal_smem[y+9][x]+ xVal_smem[y+10][x]+ xVal_smem[y+11][x]
-		//						+ xVal_smem[y+12][x] + xVal_smem[y+13][x]+ xVal_smem[y+14][x]+ xVal_smem[y+15][x]);
-		//}
 		int y = threadIdx.y;
-
 		for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
 		{
-			mean += (xVal_smem[x][y + 0] + xVal_smem[x][y + 1 ] + xVal_smem[x][y +2] + xVal_smem[x][y +3] + xVal_smem[x][y + 4] + xVal_smem[x][y + 5] + xVal_smem[x][y +6 ] + xVal_smem[x][y + 7] 				+ xVal_smem[x][y +8 ] + xVal_smem[x][y +9 ] + xVal_smem[x][y + 10] + xVal_smem[x][y + 11] 				+ xVal_smem[x][y + 12] + xVal_smem[x][y +13 ] + xVal_smem[x][y +14 ] + xVal_smem[x][y +15 ]);
+				mean += (xVal_smem[y][x] + xVal_smem[y+1][x] + xVal_smem[y+2][x] + xVal_smem[y+3][x]
+								+ xVal_smem[y+4][x] + xVal_smem[y+5][x]+ xVal_smem[y+6][x]+ xVal_smem[y+7][x]
+								+ xVal_smem[y+8][x] + xVal_smem[y+9][x]+ xVal_smem[y+10][x]+ xVal_smem[y+11][x]
+								+ xVal_smem[y+12][x] + xVal_smem[y+13][x]+ xVal_smem[y+14][x]+ xVal_smem[y+15][x]);
 		}
-		mean = mean / 256.0;
+
+		mean = mean / 256.0f; //Cannot use >> because it is illeagal on float
 		int x = blockIdx.x;
 		int y1 = blockIdx.y;
 		//out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
@@ -306,7 +293,7 @@ void kernel_wrapper()
 			fscanf(fp, "%f", &a[i*N + j]);
 		}
 	}
-	write_to_file_DEBUG(a, N);
+
 	dim3 gridSize(32, 32, 1);
 	dim3 blockSize(BLK_SIZE, BLK_SIZE, 1);
 	static float h_orig_out[N * N];
