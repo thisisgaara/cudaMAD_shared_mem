@@ -170,8 +170,9 @@ __global__ void min_kernel(float* xVal, float* out, float* outStd, float* outSkw
 	//Declarations
 	__shared__ float xVal_smem[2 * (WIN_SIZE)][2 * (WIN_SIZE)]; //32*32 for shared memory 32 * 32 for mean calculation
 	__shared__ float xVal_stride[2 * (WIN_SIZE)][2 * (WIN_SIZE)];
-	float mean = 0, stdev = 0, skw = 0, krt = 0, stmp = 0;
+	float  stdev = 0, skw = 0, krt = 0, stmp = 0;
 	float iB, jB;
+	double mean = 0;
 	//https://cs.calvin.edu/courses/cs/374/CUDA/CUDA-Thread-Indexing-Cheatsheet.pdf
 
 	//Used in code
@@ -200,25 +201,6 @@ __global__ void min_kernel(float* xVal, float* out, float* outStd, float* outSkw
 
 	if ((threadIdx.x % 4 == 0 && threadIdx.y % 4 == 0))
 	{
-		/*for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
-		{
-			for (int y = threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
-			{
-				mean += xVal_smem[y][x];
-			}
-		}*/
-		//mean = 0;
-		//float temp = 0;
-		//if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 9 && blockIdx.y == 0)
-		for (int x = 0 + threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
-		{
-			for (int y = 0 + threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
-			{
-				mean += xVal_smem[x][y];
-			}
-		}
-		//mean = 0;
-
 		//int y = threadIdx.y;
 		//for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
 		//{
@@ -227,13 +209,13 @@ __global__ void min_kernel(float* xVal, float* out, float* outStd, float* outSkw
 		//						+ xVal_smem[y+8][x] + xVal_smem[y+9][x]+ xVal_smem[y+10][x]+ xVal_smem[y+11][x]
 		//						+ xVal_smem[y+12][x] + xVal_smem[y+13][x]+ xVal_smem[y+14][x]+ xVal_smem[y+15][x]);
 		//}
-		//int y = threadIdx.y;
+		int y = threadIdx.y;
 
-		//for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
-		//{
-		//	mean += (xVal_smem[x][y + 0] + xVal_smem[x][y + 1 ] + xVal_smem[x][y +2 ] + xVal_smem[x][y +3] 				+ xVal_smem[x][y + 4] + xVal_smem[x][y + 5] + xVal_smem[x][y +6 ] + xVal_smem[x][y + 7] 				+ xVal_smem[x][y +8 ] + xVal_smem[x][y +9 ] + xVal_smem[x][y + 10] + xVal_smem[x][y + 11] 				+ xVal_smem[x][y + 12] + xVal_smem[x][y +13 ] + xVal_smem[x][y +14 ] + xVal_smem[x][y +15 ]);
-		//}
-		mean = mean / 256.0f;
+		for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
+		{
+			mean += (xVal_smem[x][y + 0] + xVal_smem[x][y + 1 ] + xVal_smem[x][y +2] + xVal_smem[x][y +3] + xVal_smem[x][y + 4] + xVal_smem[x][y + 5] + xVal_smem[x][y +6 ] + xVal_smem[x][y + 7] 				+ xVal_smem[x][y +8 ] + xVal_smem[x][y +9 ] + xVal_smem[x][y + 10] + xVal_smem[x][y + 11] 				+ xVal_smem[x][y + 12] + xVal_smem[x][y +13 ] + xVal_smem[x][y +14 ] + xVal_smem[x][y +15 ]);
+		}
+		mean = mean / 256.0;
 		int x = blockIdx.x;
 		int y1 = blockIdx.y;
 		//out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
@@ -324,7 +306,7 @@ void kernel_wrapper()
 			fscanf(fp, "%f", &a[i*N + j]);
 		}
 	}
-
+	write_to_file_DEBUG(a, N);
 	dim3 gridSize(32, 32, 1);
 	dim3 blockSize(BLK_SIZE, BLK_SIZE, 1);
 	static float h_orig_out[N * N];
