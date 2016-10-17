@@ -113,8 +113,39 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* outStd, float* outSk
 	}
 }
 #endif
+#ifdef ONE_D
+if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
+{
+	xVal_smem[threadIdx.x * (2 * WIN_SIZE) + threadIdx.y] = xVal[global_idx* N + global_idy];
+	xVal_smem[(threadIdx.x + WIN_SIZE) *(2 * WIN_SIZE) + threadIdx.y] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
+	xVal_smem[threadIdx.x * (2 * WIN_SIZE) + threadIdx.y + WIN_SIZE] = xVal[(global_idx)* N + global_idy + WIN_SIZE];
+	xVal_smem[(threadIdx.x + WIN_SIZE) *(2 * WIN_SIZE) + threadIdx.y + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
+}
+if (threadIdx.x == 15 && threadIdx.y == 15 && blockIdx.x == 0 && blockIdx.y == 0)
+printf("Hello");
+__syncthreads();
+int whoami = threadIdx.x * (2 * WIN_SIZE) + threadIdx.y;
+int flag = 0;
+int scale_x = 0;
+if ((threadIdx.x % 4 == 0 && threadIdx.y % 4 == 0))
+{
+	/*for (int scale_x = 0; scale_x < WIN_SIZE; scale_x++)
+	{
+	for (int start_index = whoami + scale_x; start_index < WIN_SIZE; start_index++)
+	{
+	mean += xVal_smem[start_index];
+	}
+	}*/
+	for (int scale_x = 0; scale_x < WIN_SIZE; scale_x++)
+	{
+		for (int start_index = whoami + scale_x; start_index < WIN_SIZE; start_index++)
+		{
+			mean += xVal_smem[start_index];
+		}
+	}
+	mean = mean / 256.0f;
+#endif
 #include "header.h"
-#define SHARED_TEST
 #include <time.h>
 #include <stdlib.h>
 
@@ -134,13 +165,11 @@ void check(float *a, float *b)
 	if (vc.size() == 0)
 		cout << "CLEAN";
 }
-#ifdef SHARED_TEST
-
-__global__ void min_kernel(float* xVal, float* out)
+__global__ void min_kernel(float* xVal, float* out, float* outStd, float* outSkw, float* outKrt)
 {
 	//Declarations
-	//__shared__ float xVal_Shm[256];
-	__shared__ float xVal_smem[WIN_SIZE+WIN_SIZE][WIN_SIZE + WIN_SIZE]; //threadDim.x, threadDim.y size
+	__shared__ float xVal_smem[2 * (WIN_SIZE)][2 * (WIN_SIZE)]; //32*32 for shared memory 32 * 32 for mean calculation
+	__shared__ float xVal_stride[2 * (WIN_SIZE)][2 * (WIN_SIZE)];
 	float mean = 0, stdev = 0, skw = 0, krt = 0, stmp = 0;
 	float iB, jB;
 	//https://cs.calvin.edu/courses/cs/374/CUDA/CUDA-Thread-Indexing-Cheatsheet.pdf
@@ -152,38 +181,70 @@ __global__ void min_kernel(float* xVal, float* out)
 	int global_idy1 = 4 * (threadIdx.y + blockIdx.y * blockDim.y);
 	out[global_idx*N + global_idy] = xVal[global_idx* N + global_idy];
 
+	//if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
+	//{
+	//	xVal_smem[threadIdx.y][threadIdx.x] = xVal[global_idx* N + global_idy];
+	//	xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x] = xVal[global_idx* N + global_idy + WIN_SIZE];
+	//	xVal_smem[threadIdx.y][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
+	//	xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
+	//}
+
 	if (global_idx < N - WIN_SIZE && global_idy < N - WIN_SIZE)
 	{
-		xVal_smem[threadIdx.y][threadIdx.x] = xVal[global_idx* N + global_idy];
-		xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x] = xVal[global_idx* N + global_idy + WIN_SIZE];
-		xVal_smem[threadIdx.y][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
-		xVal_smem[threadIdx.y + WIN_SIZE][threadIdx.x + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
+		xVal_smem[threadIdx.x][threadIdx.y] = xVal[global_idx* N + global_idy];
+		xVal_smem[threadIdx.x][threadIdx.y + WIN_SIZE] = xVal[global_idx* N + global_idy + WIN_SIZE];
+		xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y] = xVal[(global_idx + WIN_SIZE)* N + global_idy];
+		xVal_smem[threadIdx.x + WIN_SIZE][threadIdx.y + WIN_SIZE] = xVal[(global_idx + WIN_SIZE)* N + global_idy + WIN_SIZE];
 	}
 	__syncthreads();
 
-	if ((threadIdx.x % 4 ==  0 && threadIdx.y % 4 == 0))
+	if ((threadIdx.x % 4 == 0 && threadIdx.y % 4 == 0))
 	{
-		for (int x =  threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
+		/*for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
 		{
 			for (int y = threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
 			{
 				mean += xVal_smem[y][x];
 			}
+		}*/
+		//mean = 0;
+		//float temp = 0;
+		//if (threadIdx.x == 0 && threadIdx.y == 0 && blockIdx.x == 9 && blockIdx.y == 0)
+		for (int x = 0 + threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
+		{
+			for (int y = 0 + threadIdx.y; y < WIN_SIZE + threadIdx.y; y++)
+			{
+				mean += xVal_smem[x][y];
+			}
 		}
+		//mean = 0;
+
+		//int y = threadIdx.y;
+		//for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
+		//{
+		//		mean += (xVal_smem[y][x] + xVal_smem[y+1][x] + xVal_smem[y+2][x] + xVal_smem[y+3][x]
+		//						+ xVal_smem[y+4][x] + xVal_smem[y+5][x]+ xVal_smem[y+6][x]+ xVal_smem[y+7][x]
+		//						+ xVal_smem[y+8][x] + xVal_smem[y+9][x]+ xVal_smem[y+10][x]+ xVal_smem[y+11][x]
+		//						+ xVal_smem[y+12][x] + xVal_smem[y+13][x]+ xVal_smem[y+14][x]+ xVal_smem[y+15][x]);
+		//}
+		//int y = threadIdx.y;
+
+		//for (int x = threadIdx.x; x < WIN_SIZE + threadIdx.x; x++)
+		//{
+		//	mean += (xVal_smem[x][y + 0] + xVal_smem[x][y + 1 ] + xVal_smem[x][y +2 ] + xVal_smem[x][y +3] 				+ xVal_smem[x][y + 4] + xVal_smem[x][y + 5] + xVal_smem[x][y +6 ] + xVal_smem[x][y + 7] 				+ xVal_smem[x][y +8 ] + xVal_smem[x][y +9 ] + xVal_smem[x][y + 10] + xVal_smem[x][y + 11] 				+ xVal_smem[x][y + 12] + xVal_smem[x][y +13 ] + xVal_smem[x][y +14 ] + xVal_smem[x][y +15 ]);
+		//}
 		mean = mean / 256.0f;
-		
 		int x = blockIdx.x;
-		int y = blockIdx.y;
+		int y1 = blockIdx.y;
 		//out[global_idx*N + global_idy] = xVal[global_idx*N + global_idy];
 		if (blockIdx.x != 31 && blockIdx.y != 31)
 		{
-			out[((x * 4) + threadIdx.x / 4) * N + (y * 4) + threadIdx.y / 4] = mean; //Too much jugaad!!
-		}	
-
+			out[((x * 4) + threadIdx.x / 4) * N + (y1 * 4) + threadIdx.y / 4] = mean; //Too much jugaad!!
+		}
 	}
 }
-#endif
-__global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
+
+__global__ void A5_fast_lo_stats_kernel(float* xVal, float* out, float* outStd, float* outSkw, float* outKrt)
 {
 	//Declarations
 	float xVal_local[WIN_SIZE * WIN_SIZE];
@@ -195,7 +256,7 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 	int j = 4 * (threadIdx.y + blockIdx.y * blockDim.y);
 	int global_idx = (threadIdx.x + blockIdx.x * blockDim.x);
 	int global_idy = (threadIdx.y + blockIdx.y * blockDim.y);
-	if ((i < N - WIN_SIZE) && (j < N- WIN_SIZE))//512-15=497
+	if ((i < N - WIN_SIZE) && (j < N - WIN_SIZE))//512-15=497
 	{
 		//for (j = 0; j<512 - 15; j += 4)
 		// THE FOLLOWING SET OF RUNNING SUMS CAN BE A set of PARALLEL REDUCTIONs (in shared memory?)
@@ -209,64 +270,20 @@ __global__ void A5_fast_lo_stats_kernel(float* xVal, float* out)
 				xVal_local[idx++] = xVal[iB * N + jB];
 			}
 		}
-	//	//Traverse through and get mean
+		//	//Traverse through and get mean
 		float mean = 0;
 		for (idx = 0; idx < WIN_SIZE * WIN_SIZE; idx++)
-					mean += xVal_local[idx];				//this can be a simple reduction in shared memory
+			mean += xVal_local[idx];				//this can be a simple reduction in shared memory
 		mean = mean / 256.0f;
-		
-	//	printf("%d %d %d %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y, global_idx*N + global_idy);
+
+		//	printf("%d %d %d %d\n", threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y, global_idx*N + global_idy);
 		out[global_idx * N + global_idy] = mean;
-	//	
+		//	
 	}
 	else
 		out[global_idx * N + global_idy] = xVal[global_idx * N + global_idy];
 }
-void min_CPU(float init_array[N*N], float target[])
-{
-	/*memset(init_array, 0, sizeof(init_array));
-	for (int i = 0; i < N + WIN_SIZE; i++)
-	{
-	for (int j = 0; j < N + WIN_SIZE; j++)
-	{
-	if (i < N && j < N)
-	{
-	init_array[i][j] = src[i * N + j];
-	}
-	else
-	{
-	if (i >= N && j < N)
-	{
-	init_array[i][j] = init_array[(i - WIN_SIZE)][j];
-	}
-	else if (j >= N && i < N)
-	{
-	init_array[i][j] = init_array[i][(j - WIN_SIZE)];
-	}
-	else if (i >= N && j >= N)
-	{
-	init_array[i][j] = init_array[(i - WIN_SIZE)][(j - WIN_SIZE)];
-	}
-	}
-	}
-	}
-	*///First copy WIN_SIZE cols and WIN_SIZE rows of the array
-	for (int i = 0; i < N - WIN_SIZE; i++)
-	{
-		for (int j = 0; j < N - WIN_SIZE; j++)
-		{
-			float mean = 0;
-			for (int p = 0; p < WIN_SIZE; p++)
-			{
-				for (int q = 0; q < WIN_SIZE; q++)
-				{
-					mean += init_array[(i + p) *N + (j + q)];
-				}
-			}
-			target[i * N + j] = mean / 4.0f;
-		}
-	}
-}
+
 
 void fill_input(float *a)
 {
@@ -293,7 +310,7 @@ void write_to_file_DEBUG(float* w, int length)
 }
 void kernel_wrapper()
 {
-#ifdef SHARED_TEST
+
 	FILE *fp = NULL;
 	fp = fopen("Xval.txt", "r");
 	if (fp == NULL)
@@ -312,53 +329,58 @@ void kernel_wrapper()
 	dim3 blockSize(BLK_SIZE, BLK_SIZE, 1);
 	static float h_orig_out[N * N];
 	static float h_shared_out[N * N];
-	static float h_orig_out_cpu[N*N];
-	memset(h_orig_out_cpu, 0, sizeof(h_orig_out_cpu));
+
+	//static float h_shared_out_outStd[N * N];
+	//static float h_shared_out_outSkw[N * N];
+	//static float h_shared_out_outKrt[N * N];
+
+	//static float h_orig_out_outStd[N * N];
+	//static float h_orig_out_outSkw[N * N];
+	//static float h_orig_out_outKrt[N * N];
+
+	
 	//min_CPU(a, h_orig_out_cpu);
 	//write_to_file_DEBUG(h_orig_out, sizeof(h_orig_out) / sizeof(float));
 	float* d_a, *d_out;
+	float* d_outStd, *d_outSkw,  *d_outKrt;
 	cudaMalloc(&d_a, sizeof(float) * N*N);
 	cudaMalloc(&d_out, sizeof(float)*N*N);
+	/*cudaMalloc(&d_outStd, sizeof(float)*N*N);
+	cudaMalloc(&d_outSkw, sizeof(float)*N*N);
+	cudaMalloc(&d_outKrt, sizeof(float)*N*N);*/
 
 	cudaMemset(d_a, 0, sizeof(float)* N*N);
 	cudaMemset(d_out, 0, sizeof(float)* N*N);
+	/*cudaMemset(d_outStd, 0, sizeof(float)* N*N);
+	cudaMemset(d_outSkw, 0, sizeof(float)* N*N);
+	cudaMemset(d_outKrt, 0, sizeof(float)* N*N);*/
 
 	cudaMemcpy(d_a, a, sizeof(float) * N*N, cudaMemcpyHostToDevice);
-	A5_fast_lo_stats_kernel << < gridSize, blockSize >> > (d_a, d_out);
+	A5_fast_lo_stats_kernel << < gridSize, blockSize >> > (d_a, d_out, d_outStd, d_outSkw, d_outKrt);
 	cudaMemcpy(h_orig_out, d_out, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	//cudaMemcpy(h_orig_out_outStd, d_outStd, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	//cudaMemcpy(h_orig_out_outSkw, d_outSkw, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	//cudaMemcpy(h_orig_out_outKrt, d_outKrt, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
 	write_to_file_DEBUG(h_orig_out, N);
 
-	cudaMemset(d_a, 0, sizeof(float)* N*N);
-	cudaMemset(d_out, 0, sizeof(float)* N*N);
-	cudaMemcpy(d_a, a, sizeof(float) * N*N, cudaMemcpyHostToDevice);
-	cout << "Hallelujah" << endl;
-	min_kernel<< < gridSize, blockSize >> > (d_a, d_out);
-	cudaMemcpy(h_shared_out, d_out, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
-	write_to_file_DEBUG(h_shared_out, N);
-#if 0
-	cudaMalloc(&d_a, sizeof(int) * (N + WIN_SIZE) * (N + WIN_SIZE));
-	cudaMalloc(&d_b, sizeof(int) * (N + WIN_SIZE) * (N + WIN_SIZE));
-	cudaMalloc(&d_out, sizeof(int)*N*N);
 
-	cudaMemcpy(d_a, init_array, sizeof(int) * (N + WIN_SIZE) * (N + WIN_SIZE), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_b, init_array, sizeof(int) * (N + WIN_SIZE) * (N + WIN_SIZE), cudaMemcpyHostToDevice);
-	min_kernel_no_shared<< < gridSize, blockSize >> > (d_a, d_b, d_out);
-	cudaMemcpy(h_shared_out, d_out, sizeof(int) * N*N, cudaMemcpyDeviceToHost);
-#endif
-#endif
-#if 0
-	A5_fast_lo_stats_kernel << < gridSize, blockSize, 0 >> >(d_a,d_b d_out);
-	cudaMemcpy(h_orig_out, d_out, N*N*sizeof(int), cudaMemcpyDeviceToHost);
-	cudaMemset(d_out, 0, N * N);
-	//write_to_file_DEBUG(h_orig_out, N);
-	A5_fast_lo_stats_kernel_SHARED << < gridSize, blockSize, 0 >> >(d_a, d_out);
-	cudaMemcpy(h_shared_out, d_out, N*N*sizeof(int), cudaMemcpyDeviceToHost);
-#endif
+	cout << "Hallelujah" << endl;
+	min_kernel << < gridSize, blockSize >> > (d_a, d_out, d_outStd, d_outSkw, d_outKrt);
+
+	cudaMemcpy(h_shared_out, d_out, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	//cudaMemcpy(h_shared_out_outStd, d_outStd, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	//cudaMemcpy(h_shared_out_outSkw, d_outSkw, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	//cudaMemcpy(h_shared_out_outKrt, d_outKrt, sizeof(float) * N*N, cudaMemcpyDeviceToHost);
+	write_to_file_DEBUG(h_shared_out, N);
+
 	check(h_shared_out, h_orig_out);
+	//check(h_shared_out_outStd, h_orig_out_outStd);
+	//check(h_shared_out_outSkw, h_orig_out_outSkw);
+	//check(h_shared_out_outKrt, h_orig_out_outKrt);
 	//check(h_orig_out_cpu, h_orig_out);
 	cudaFree(d_a);
 	cudaFree(d_out);
 	cudaDeviceReset();
 	getchar();
-	
+
 }
